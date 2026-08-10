@@ -1,0 +1,19 @@
+{
+  "name": "pda-scan",
+  "id": "pda-scan",
+  "version": "1.0.0",
+  "description": "海康 DS-MDT201 广播扫码 UniApp Android 原生插件",
+  "_dp_type": "nativeplugin",
+  "_dp_nativeplugin": {
+    "android": {
+      "integrateType": "aar",
+      "plugins": [
+        {
+          "type": "module",
+          "name": "PdaScan",
+          "class": "com.ikaros.hikvision.mdt201.PdaScanModule"
+        }
+      ]
+    }
+  }
+}

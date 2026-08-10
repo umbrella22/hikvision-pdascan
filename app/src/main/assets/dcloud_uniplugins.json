@@ -1,0 +1,13 @@
+{
+  "nativePlugins": [
+    {
+      "plugins": [
+        {
+          "type": "module",
+          "name": "PdaScan",
+          "class": "com.ikaros.hikvision.mdt201.PdaScanModule"
+        }
+      ]
+    }
+  ]
+}

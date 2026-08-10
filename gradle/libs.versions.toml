@@ -1,0 +1,5 @@
+[versions]
+fastjson = "1.2.83"
+
+[libraries]
+fastjson = { group = "com.alibaba", name = "fastjson", version.ref = "fastjson" }
