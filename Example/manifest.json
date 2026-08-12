@@ -1,0 +1,43 @@
+{
+    "name" : "pda-scan-demo",
+    "appid" : "__UNI__FECC10F",
+    "description" : "pda-scan UTS 插件演示工程（海康 DS-MDT201 广播扫码）",
+    "versionName" : "1.0.2",
+    "versionCode" : 102,
+    "transformPx" : false,
+    "app-plus" : {
+        "usingComponents" : true,
+        "nvueStyleCompiler" : "uni-app",
+        "compilerVersion" : 3,
+        "splashscreen" : {
+            "alwaysShowBeforeRender" : true,
+            "waiting" : true,
+            "autoclose" : true,
+            "delay" : 0
+        },
+        "modules" : {},
+        "distribute" : {
+            "android" : {
+                "permissions" : []
+            },
+            "ios" : {
+                "dSYMs" : false
+            },
+            "sdkConfigs" : {}
+        }
+    },
+    "quickapp" : {},
+    "mp-weixin" : {
+        "appid" : "",
+        "setting" : {
+            "urlCheck" : false
+        },
+        "usingComponents" : true
+    },
+    "vueVersion" : "3",
+    "fallbackLocale" : "zh-Hans",
+    "locale" : "zh-Hans",
+    "uniStatistics" : {
+        "debug" : false
+    }
+}

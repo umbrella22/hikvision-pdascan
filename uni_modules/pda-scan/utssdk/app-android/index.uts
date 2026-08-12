@@ -1,0 +1,320 @@
+import { UTSAndroid } from 'io.dcloud.uts';
+import Context from 'android.content.Context';
+import Intent from 'android.content.Intent';
+import IntentFilter from 'android.content.IntentFilter';
+import BroadcastReceiver from 'android.content.BroadcastReceiver';
+import Build from 'android.os.Build';
+import Log from 'android.util.Log';
+import { PdaScanEvent, PdaScanOptions, PdaScanOnceCallback, PdaScanKeepAliveCallback } from '../interface.uts';
+
+/** 开始扫码控制广播 */
+const START_ACTION: string = 'android.intent.ACTION_SCAN_START';
+/** 停止扫码控制广播 */
+const STOP_ACTION: string = 'android.intent.ACTION_SCAN_STOP';
+/** 默认扫码结果广播 */
+const DEFAULT_RESULT_ACTION: string = 'android.intent.ACTION_SCAN_OUTPUT';
+/** 默认条码字段 key */
+const DEFAULT_RESULT_DATA_KEY: string = 'barcode';
+/** 测试事件条码 */
+const TEST_BARCODE: string = 'PDA_SCAN_EVENT_TEST';
+/** Android 13（API 33）动态广播接收器需声明 RECEIVER_EXPORTED */
+const API_TIRAMISU: number = 33;
+const LOG_TAG: string = 'PdaScanUTS';
+
+/** 当前配置的扫码结果广播 action */
+let resultAction: string = DEFAULT_RESULT_ACTION;
+/** 当前配置的条码字段 key */
+let resultDataKey: string = DEFAULT_RESULT_DATA_KEY;
+/** 持续回调（startScan / startListening 注册） */
+let eventCallback: PdaScanKeepAliveCallback | null = null;
+/** 接收器是否已注册 */
+let receiverRegistered: boolean = false;
+/** 当前接收器实际注册的扫码结果广播 action */
+let registeredResultAction: string | null = null;
+
+/**
+ * 扫码结果广播接收器：匹配配置的 resultAction，读取条码后推送事件
+ */
+class ScanResultReceiver extends BroadcastReceiver {
+	constructor() {
+		super();
+	}
+
+	override onReceive(context: Context, intent: Intent): void {
+		const action: string | null = intent.getAction();
+		nativeLog('onReceive: action=' + action + ', expectedAction=' + resultAction + ', dataKey=' + resultDataKey);
+		// 注意：必须用 !=（值比较）。=== / !== 编译到 Kotlin 后是引用比较，
+		// intent.getAction() 返回的 String 与常量字符串引用不同，会永远判为不相等。
+		if (action != resultAction) {
+			nativeLog('onReceive dropped: action does not match expected action');
+			return;
+		}
+
+		const raw: string | null = intent.getStringExtra(resultDataKey);
+		if (raw == null || raw.trim() == '') {
+			nativeLog('onReceive dropped: missing or blank extra, key=' + resultDataKey);
+			return;
+		}
+
+		const barcode: string = raw.trim();
+		nativeLog('onReceive accepted: barcode=' + barcode + ', length=' + barcode.length);
+		emitScanResult(barcode, false);
+	}
+}
+
+const scanResultReceiver: ScanResultReceiver = new ScanResultReceiver();
+
+/**
+ * 启动扫码：发送开始扫码控制广播，并注册结果广播接收器。
+ * 回调可被多次调用，依次收到 started 状态、扫码结果、错误。
+ */
+@UTSJS.keepAlive
+export function startScan(options: PdaScanOptions, callback: PdaScanKeepAliveCallback): void {
+	applyOptions(options);
+	eventCallback = callback;
+	nativeLog('startScan: resultAction=' + resultAction + ', dataKey=' + resultDataKey + ', registered=' + receiverRegistered);
+
+	const context: Context | null = UTSAndroid.getAppContext();
+	if (context == null) {
+		nativeLog('startScan failed: Android Context unavailable');
+		callback(errorResult('CONTEXT_UNAVAILABLE', '无法获取 Android Context'));
+		return;
+	}
+
+	try {
+		registerReceiver(context);
+		context.sendBroadcast(new Intent(START_ACTION));
+	} catch (e) {
+		nativeLog('startScan failed: ' + (e.message ?? 'unknown error'));
+		callback(errorResult('START_FAILED', e.message ?? ''));
+		return;
+	}
+
+	nativeLog('startScan completed: start action broadcast sent');
+	callback(statusResult('started'));
+}
+
+/**
+ * 停止扫码：仅发送停止扫码控制广播，交由硬件停止扫描。
+ * 不注销监听、不清空回调；如需停止监听请调用 stopListening。
+ */
+export function stopScan(callback?: PdaScanOnceCallback | null): void {
+	nativeLog('stopScan: sending stop action broadcast');
+	const context: Context | null = UTSAndroid.getAppContext();
+	if (context != null) {
+		try {
+			context.sendBroadcast(new Intent(STOP_ACTION));
+			nativeLog('stopScan completed: stop action broadcast sent');
+		} catch (e) {
+			nativeLog('stopScan failed: ' + (e.message ?? 'unknown error'));
+		}
+	} else {
+		nativeLog('stopScan: Android Context unavailable');
+	}
+	callback?.(statusResult('stopped'));
+}
+
+/**
+ * 停止监听：注销扫码结果广播接收器并清空持续回调。
+ * 不发送停止扫码控制广播；如需让硬件停止扫描请调用 stopScan。
+ */
+export function stopListening(callback?: PdaScanOnceCallback | null): void {
+	nativeLog('stopListening: registered=' + receiverRegistered);
+	const context: Context | null = UTSAndroid.getAppContext();
+	if (context != null) {
+		try {
+			unregisterReceiver(context);
+		} catch (e) {
+			nativeLog('stopListening failed: ' + (e.message ?? 'unknown error'));
+		}
+	} else {
+		nativeLog('stopListening: Android Context unavailable');
+	}
+	eventCallback = null;
+	nativeLog('stopListening completed: callback cleared');
+	callback?.(statusResult('stopped'));
+}
+
+/**
+ * 仅开始监听：扫描枪已由硬件按键或其他组件触发时使用，只注册接收器、
+ * 不发送开始扫码控制广播。回调可被多次调用。
+ */
+@UTSJS.keepAlive
+export function startListening(options: PdaScanOptions, callback: PdaScanKeepAliveCallback): void {
+	applyOptions(options);
+	eventCallback = callback;
+	nativeLog('startListening: resultAction=' + resultAction + ', dataKey=' + resultDataKey + ', registered=' + receiverRegistered);
+
+	const context: Context | null = UTSAndroid.getAppContext();
+	if (context == null) {
+		nativeLog('startListening failed: Android Context unavailable');
+		callback(errorResult('CONTEXT_UNAVAILABLE', '无法获取 Android Context'));
+		return;
+	}
+
+	try {
+		registerReceiver(context);
+	} catch (e) {
+		nativeLog('startListening failed: ' + (e.message ?? 'unknown error'));
+		callback(errorResult('LISTEN_FAILED', e.message ?? ''));
+		return;
+	}
+
+	nativeLog('startListening completed');
+	callback(statusResult('listening'));
+}
+
+/**
+ * 更新配置：resultAction、resultDataKey。已在监听时自动重注册接收器。
+ */
+export function configure(options: PdaScanOptions, callback?: PdaScanOnceCallback | null): void {
+	const previousAction: string = resultAction;
+	const previousDataKey: string = resultDataKey;
+	applyOptions(options);
+	nativeLog('configure: action=' + previousAction + ' -> ' + resultAction + ', dataKey=' + previousDataKey + ' -> ' + resultDataKey + ', registered=' + receiverRegistered);
+	const context: Context | null = UTSAndroid.getAppContext();
+	if (context != null && receiverRegistered) {
+		try {
+			registerReceiver(context);
+		} catch (e) {
+			nativeLog('configure failed: ' + (e.message ?? 'unknown error'));
+			callback?.(errorResult('CONFIGURE_FAILED', e.message ?? ''));
+			return;
+		}
+	} else if (context == null) {
+		nativeLog('configure: Android Context unavailable, configuration saved without receiver update');
+	}
+	nativeLog('configure completed');
+	callback?.(configurationResult());
+}
+
+/**
+ * 发送测试事件：向持续回调推送一次测试条码，用于验证 UTS -> JS 链路。
+ * 验证后不要将它作为实际扫码流程使用。
+ */
+export function emitTestEvent(callback?: PdaScanOnceCallback | null): void {
+	nativeLog('emitTestEvent: callbackPresent=' + (eventCallback != null));
+	emitScanResult(TEST_BARCODE, true);
+	const res: PdaScanEvent = statusResult('test_event_emitted');
+	res.barcode = TEST_BARCODE;
+	callback?.(res);
+}
+
+/**
+ * 获取当前配置。
+ */
+export function getConfiguration(): PdaScanEvent {
+	return configurationResult();
+}
+
+/**
+ * 应用配置选项（仅覆盖非空值）
+ */
+function applyOptions(options: PdaScanOptions): void {
+	if (options == null) {
+		nativeLog('applyOptions skipped: options is null');
+		return;
+	}
+
+	if (options.resultAction != null && options.resultAction!.trim() != '') {
+		resultAction = options.resultAction!.trim();
+	}
+	if (options.resultDataKey != null && options.resultDataKey!.trim() != '') {
+		resultDataKey = options.resultDataKey!.trim();
+	}
+}
+
+/**
+ * 注册扫码结果广播接收器（Android 13+ 使用 RECEIVER_EXPORTED）
+ */
+function registerReceiver(context: Context): void {
+	if (receiverRegistered) {
+		if (registeredResultAction == resultAction) {
+			nativeLog('registerReceiver skipped: already registered for action=' + registeredResultAction);
+			return;
+		}
+		nativeLog('registerReceiver: action changed from ' + registeredResultAction + ' to ' + resultAction + ', re-registering');
+		unregisterReceiver(context);
+	}
+
+	const filter: IntentFilter = new IntentFilter(resultAction);
+	nativeLog('registerReceiver: action=' + resultAction + ', apiLevel=' + Build.VERSION.SDK_INT);
+	if (Build.VERSION.SDK_INT >= API_TIRAMISU) {
+		context.registerReceiver(scanResultReceiver, filter, Context.RECEIVER_EXPORTED);
+	} else {
+		context.registerReceiver(scanResultReceiver, filter);
+	}
+	receiverRegistered = true;
+	registeredResultAction = resultAction;
+	nativeLog('registerReceiver completed: action=' + registeredResultAction);
+}
+
+/**
+ * 注销扫码结果广播接收器
+ */
+function unregisterReceiver(context: Context): void {
+	if (!receiverRegistered) {
+		nativeLog('unregisterReceiver skipped: receiver is not registered');
+		return;
+	}
+	nativeLog('unregisterReceiver: action=' + registeredResultAction);
+	context.unregisterReceiver(scanResultReceiver);
+	receiverRegistered = false;
+	registeredResultAction = null;
+	nativeLog('unregisterReceiver completed');
+}
+
+/**
+ * 向持续回调推送扫码结果
+ */
+function emitScanResult(barcode: string, isTest: boolean): void {
+	const callback = eventCallback;
+	if (callback != null) {
+		nativeLog('emitScanResult: barcode=' + barcode + ', isTest=' + isTest);
+		callback(scanResult(barcode, isTest));
+	} else {
+		nativeLog('emitScanResult dropped: callback is null, barcode=' + barcode + ', isTest=' + isTest);
+	}
+}
+
+function nativeLog(message: string): void {
+	Log.i(LOG_TAG, message);
+}
+
+/** 构建扫码结果事件 */
+function scanResult(barcode: string, isTest: boolean): PdaScanEvent {
+	const res: PdaScanEvent = configurationResult();
+	res.type = 'scan';
+	res.barcode = barcode;
+	res.isTest = isTest;
+	return res;
+}
+
+/** 构建状态事件 */
+function statusResult(status: string): PdaScanEvent {
+	const res: PdaScanEvent = configurationResult();
+	res.status = status;
+	return res;
+}
+
+/** 构建错误事件 */
+function errorResult(code: string, message: string): PdaScanEvent {
+	const res: PdaScanEvent = configurationResult();
+	res.type = 'error';
+	res.code = code;
+	res.message = message;
+	return res;
+}
+
+/** 构建配置结果（含当前配置与监听状态） */
+function configurationResult(): PdaScanEvent {
+	const res: PdaScanEvent = {
+		type: 'status',
+		status: 'configured',
+		resultAction: resultAction,
+		resultDataKey: resultDataKey,
+		isListening: receiverRegistered,
+		isTest: false
+	};
+	return res;
+}

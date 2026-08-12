@@ -1,0 +1,53 @@
+{
+    "id": "pda-scan",
+    "displayName": "PDA扫码（海康DS-MDT201）",
+    "version": "1.0.0",
+    "description": "海康 DS-MDT201 广播扫码 UTS 插件：监听扫码结果广播并持续回调条码，支持结果广播与条码字段配置、状态回调与测试事件。",
+    "keywords": [
+        "PDA",
+        "扫码",
+        "海康",
+        "DS-MDT201",
+        "broadcast",
+        "scanner"
+    ],
+    "repository": "",
+    "engines": {
+        "HBuilderX": "^3.6.8"
+    },
+    "dcloudext": {
+        "type": "uts",
+        "sale": {
+            "regular": {
+                "price": "0.00"
+            },
+            "sourcecode": {
+                "price": "0.00"
+            }
+        },
+        "contact": {
+            "qq": ""
+        },
+        "declaration": {
+            "ads": "",
+            "data": "",
+            "permissions": ""
+        },
+        "npmurl": ""
+    },
+    "uni_modules": {
+        "dependencies": [],
+        "encrypt": [],
+        "platforms": {
+            "client": {
+                "Vue": {
+                    "vue2": "u",
+                    "vue3": "u"
+                },
+                "App": {
+                    "app-android": "u"
+                }
+            }
+        }
+    }
+}

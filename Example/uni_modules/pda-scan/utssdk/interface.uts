@@ -1,0 +1,46 @@
+/**
+ * pda-scan UTS 插件 —— 对外 API 类型声明
+ *
+ * 本文件声明插件对外暴露的数据类型，具体实现在
+ * utssdk/app-android/index.uts（Android 平台）中。
+ */
+
+/** 扫码/状态/错误事件结果 */
+export type PdaScanEvent = {
+  /** 事件类型：scan（扫码结果）、status（状态）、error（错误） */
+  type: string;
+  /** 扫码结果条码（type 为 scan 时存在） */
+  barcode?: string;
+  /** 状态值：started / stopped / listening（type 为 status 时存在） */
+  status?: string;
+  /** 错误码（type 为 error 时存在），如 CONTEXT_UNAVAILABLE、START_FAILED、LISTEN_FAILED */
+  code?: string;
+  /** 错误信息（type 为 error 时存在） */
+  message?: string;
+  /** 当前配置的扫码结果广播 action */
+  resultAction: string;
+  /** 当前配置的条码字段 key */
+  resultDataKey: string;
+  /** 是否正在监听扫码结果广播 */
+  isListening: boolean;
+  /** 是否为测试事件（emitTestEvent 发出） */
+  isTest: boolean;
+};
+
+/** 扫码配置选项 */
+export type PdaScanOptions = {
+  /** 扫码结果广播 action，默认 android.intent.ACTION_SCAN_OUTPUT */
+  resultAction?: string | null;
+  /** 条码字段 key，默认 barcode */
+  resultDataKey?: string | null;
+};
+
+/** 单次回调：仅回调一次（stopScan、configure、emitTestEvent） */
+export type PdaScanOnceCallback = (res: PdaScanEvent) => void;
+
+/**
+ * 持续回调：startScan / startListening 传入，可被多次调用。
+ * 扫码结果、状态、错误都会通过它推送（对应函数在实现中以
+ * @UTSJS.keepAlive 标记，JS 端回调不会因函数返回而失效）。
+ */
+export type PdaScanKeepAliveCallback = (res: PdaScanEvent) => void;
